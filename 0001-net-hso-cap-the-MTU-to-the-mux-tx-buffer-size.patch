@@ -1,0 +1,33 @@
+From 216222428eeb657d992996559cc8a2728691099b Mon Sep 17 00:00:00 2001
+From: Aibing Chen <chenaibing@cmss.chinamobile.com>
+Date: Mon, 16 Nov 2026 09:37:12 +0800
+Subject: [PATCH] net: hso: cap the MTU to the mux tx buffer size
+
+hso_net_start_xmit() copies skb->len bytes into odev->mux_bulk_tx_buf,
+which is a fixed MUX_BULK_TX_BUF_SIZE (2048) allocation made by
+hso_create_net_device().  The net device does not set max_mtu, so
+userspace can raise the MTU up to IP_MAX_MTU and make that copy overflow
+the buffer; the same length is passed to usb_fill_bulk_urb().
+
+Cap the MTU at the buffer size, keeping the 14 byte allowance that the
+default MTU already uses.
+
+Fixes: 72dc1c096c70 ("HSO: add option hso driver")
+Cc: stable@vger.kernel.org
+Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
+---
+ drivers/net/usb/hso.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/net/usb/hso.c b/drivers/net/usb/hso.c
+index 71caa3764..45713c994 100644
+--- a/drivers/net/usb/hso.c
++++ b/drivers/net/usb/hso.c
+@@ -2393,6 +2393,7 @@ static void hso_net_init(struct net_device *net)
+ 	net->flags = IFF_POINTOPOINT | IFF_NOARP | IFF_MULTICAST;
+ 	net->type = ARPHRD_NONE;
+ 	net->mtu = DEFAULT_MTU - 14;
++	net->max_mtu = MUX_BULK_TX_BUF_SIZE - 14;
+ 	net->tx_queue_len = 10;
+ 	net->ethtool_ops = &ops;
+ 

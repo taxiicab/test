@@ -1,0 +1,50 @@
+From 036c2d97346f60ebf2c7eb96049def4e1aea6acf Mon Sep 17 00:00:00 2001
+From: Aibing Chen <chenaibing@cmss.chinamobile.com>
+Date: Sat, 14 Nov 2026 18:16:28 +0800
+Subject: [PATCH net] net: ethernet: ti: netcp: fix queue name buffer size
+
+netcp_txpipe_open() and netcp_setup_navigator_resources() format a queue
+or pool name into a 16 byte stack buffer.  The longest of these names is
+"rx-fdq-<devname>-<n>": 7 characters of prefix, IFNAMSIZ - 1 (15)
+characters of device name, a dash and the queue index, so it needs up to
+35 bytes.
+
+Building the driver with W=1 reports a -Wformat-truncation warning for
+each snprintf() that formats ndev->name, e.g. for "rx-pool-%s" the
+compiler warns that the %s directive may write up to 15 bytes into a
+region of size 8.
+
+netcp_txpipe_open() formats dev_name(dev), which is not bounded by
+IFNAMSIZ either, so size that buffer the same way.
+
+The names are only used for knav debugfs entries and for dev_dbg() and
+dev_err() messages, so nothing changes apart from the names no longer
+being cut short.
+
+Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
+---
+ drivers/net/ethernet/ti/netcp_core.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/ethernet/ti/netcp_core.c b/drivers/net/ethernet/ti/netcp_core.c
+index f5e093dc9..a746b0348 100644
+--- a/drivers/net/ethernet/ti/netcp_core.c
++++ b/drivers/net/ethernet/ti/netcp_core.c
+@@ -1327,7 +1327,7 @@ int netcp_txpipe_open(struct netcp_tx_pipe *tx_pipe)
+ 	struct device *dev = tx_pipe->netcp_device->device;
+ 	struct knav_dma_cfg config;
+ 	int ret = 0;
+-	u8 name[16];
++	u8 name[40];
+ 
+ 	memset(&config, 0, sizeof(config));
+ 	config.direction = DMA_MEM_TO_DEV;
+@@ -1584,7 +1584,7 @@ static int netcp_setup_navigator_resources(struct net_device *ndev)
+ 	struct knav_queue_notify_config notify_cfg;
+ 	struct knav_dma_cfg config;
+ 	u32 last_fdq = 0;
+-	u8 name[16];
++	u8 name[40];
+ 	int ret;
+ 	int i;
+ 

@@ -1,0 +1,33 @@
+From 16e370f8823f770c70a561128da7cb6f5267134f Mon Sep 17 00:00:00 2001
+From: Aibing Chen <chenaibing@cmss.chinamobile.com>
+Date: Sat, 14 Nov 2026 20:36:43 +0800
+Subject: [PATCH] ALSA: hdsp: enlarge the MIDI name buffer
+
+snd_hdsp_create_midi() formats "<card shortname> MIDI <n>" into a 40
+byte buffer.  The card shortname can be up to 31 characters, " MIDI "
+adds 6 and the MIDI number up to 11, so the name can reach 48
+characters plus the terminator.
+
+Building with W=1 reports a -Wformat-truncation warning: the output can
+reach 49 bytes including the terminator into a destination of size 40.
+Only the rawmidi device name is affected, so nothing changes apart from
+the name no longer being cut short.
+
+Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
+---
+ sound/pci/rme9652/hdsp.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/sound/pci/rme9652/hdsp.c b/sound/pci/rme9652/hdsp.c
+index 7dce548b9..ba5c8bf0f 100644
+--- a/sound/pci/rme9652/hdsp.c
++++ b/sound/pci/rme9652/hdsp.c
+@@ -1482,7 +1482,7 @@ static const struct snd_rawmidi_ops snd_hdsp_midi_input =
+ 
+ static int snd_hdsp_create_midi (struct snd_card *card, struct hdsp *hdsp, int id)
+ {
+-	char buf[40];
++	char buf[64];
+ 
+ 	hdsp->midi[id].id = id;
+ 	hdsp->midi[id].rmidi = NULL;

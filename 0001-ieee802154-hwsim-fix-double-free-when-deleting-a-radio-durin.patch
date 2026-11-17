@@ -1,0 +1,65 @@
+From 1b7f61115560db2b6fdbc33e5d80ea7425c27cfd Mon Sep 17 00:00:00 2001
+From: Aibing Chen <chenaibing@cmss.chinamobile.com>
+Date: Sat, 14 Nov 2026 21:14:03 +0800
+Subject: [PATCH] ieee802154: hwsim: fix double free when deleting a radio
+ during a scan
+
+hwsim_del() frees phy->pib before ieee802154_unregister_hw().
+Unregistering the hardware closes the slave interface, which aborts an
+ongoing scan and calls back into hwsim_hw_channel() and
+hwsim_update_pib().  That installs a new PIB and schedules the old one
+for kfree_rcu(), so the kfree_rcu() in hwsim_del() later frees the same
+object a second time:
+
+  BUG: KASAN: invalid-free in kvfree_call_rcu
+   ...
+   hwsim_update_pib
+   hwsim_hw_channel
+   ...
+   hwsim_del
+
+Free the PIB after the hardware has been unregistered, re-reading
+phy->pib under pib_lock so that a PIB installed during teardown is freed
+exactly once.
+
+Fixes: 979d5b8de8ed ("ieee802154: hwsim: serialize pib updates to fix double-free")
+Cc: stable@vger.kernel.org
+Reported-by: syzbot+8a8482d4c33cc58babb4@syzkaller.appspotmail.com
+Closes: https://syzkaller.appspot.com/bug?extid=8a8482d4c33cc58babb4
+Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
+---
+ drivers/net/ieee802154/mac802154_hwsim.c | 18 +++++++++++++++---
+ 1 file changed, 15 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/net/ieee802154/mac802154_hwsim.c b/drivers/net/ieee802154/mac802154_hwsim.c
+index a9bd1555d..004934d7c 100644
+--- a/drivers/net/ieee802154/mac802154_hwsim.c
++++ b/drivers/net/ieee802154/mac802154_hwsim.c
+@@ -1008,12 +1008,24 @@ static void hwsim_del(struct hwsim_phy *phy)
+ 		list_del_rcu(&e->list);
+ 		hwsim_free_edge(e);
+ 	}
+-	pib = rcu_dereference(phy->pib);
+ 	rcu_read_unlock();
+ 
+-	kfree_rcu(pib, rcu);
+-
+ 	ieee802154_unregister_hw(phy->hw);
++
++	/*
++	 * Unregistering the hardware closes the slave interface, which aborts
++	 * an ongoing scan and calls back into hwsim_hw_channel().  That
++	 * replaces phy->pib, so re-read the pointer here and free the PIB that
++	 * is current after teardown exactly once, instead of double-freeing
++	 * the one sampled before unregistering.
++	 */
++	spin_lock_bh(&phy->pib_lock);
++	pib = rcu_replace_pointer(phy->pib, NULL,
++				  lockdep_is_held(&phy->pib_lock));
++	spin_unlock_bh(&phy->pib_lock);
++	if (pib)
++		kfree_rcu(pib, rcu);
++
+ 	ieee802154_free_hw(phy->hw);
+ }
+ 

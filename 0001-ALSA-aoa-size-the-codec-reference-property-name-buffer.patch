@@ -1,0 +1,40 @@
+From 75223e2fd3d3471eab52439196b6d82b18b3202e Mon Sep 17 00:00:00 2001
+From: Aibing Chen <chenaibing@cmss.chinamobile.com>
+Date: Fri, 13 Nov 2026 17:33:28 +0800
+Subject: [PATCH] ALSA: aoa: size the codec reference property name buffer
+
+check_codec() builds the device tree property name
+"platform-<codec>-codec-ref" in a 32 byte buffer with snprintf().
+A codec name may be up to MAX_CODEC_NAME_LEN - 1 (31) characters and
+the surrounding text adds 19 characters, so the full name can be 50
+characters plus the terminator.  Codec names longer than 12 characters
+are silently truncated, of_get_property() then looks up a property name
+that does not exist, and check_codec() fails the codec with "required
+property ... not present".
+
+All codecs in the tree use shorter names today, but the buffer should
+match the documented maximum.  Size it from MAX_CODEC_NAME_LEN, which
+is already available through "../aoa.h".
+
+Compiling with W=1 before this change reports:
+
+  sound/aoa/fabrics/layout.c:780:36: warning: '%s' directive output may be truncated writing up to 31 bytes into a region of size 23 [-Wformat-truncation=]
+
+Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
+---
+ sound/aoa/fabrics/layout.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/sound/aoa/fabrics/layout.c b/sound/aoa/fabrics/layout.c
+index 7bb541577..8ee66dabd 100644
+--- a/sound/aoa/fabrics/layout.c
++++ b/sound/aoa/fabrics/layout.c
+@@ -771,7 +771,7 @@ static int check_codec(struct aoa_codec *codec,
+ 		       struct codec_connect_info *cci)
+ {
+ 	const u32 *ref;
+-	char propname[32];
++	char propname[MAX_CODEC_NAME_LEN + 20];
+ 	const struct codec_connection *cc;
+ 
+ 	/* if the codec has a 'codec' node, we require a reference */

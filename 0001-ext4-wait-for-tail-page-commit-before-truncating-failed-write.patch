@@ -1,0 +1,64 @@
+From: YOUR NAME <your@email>
+Subject: [PATCH] ext4: wait for tail page commit before truncating a failed write
+
+In data=journal mode a failed buffered write can leave the folio that
+straddles i_size with buffers attached to the committing transaction.
+jbd2_journal_invalidate_folio() then returns -EBUSY for the partial
+invalidation, which ext4_journalled_invalidate_folio() reports as:
+
+  WARNING: fs/ext4/inode.c:3561 at ext4_journalled_invalidate_folio
+
+ext4_truncate_down() already waits for the tail page commit before
+invalidating the page cache, but the failed-write paths do not.
+
+shuo chen's patch handled ext4_journalled_write_end(); the error path in
+ext4_write_begin() can hit the same warning and is still unfixed, as
+pointed out by the review of that patch.  Wait for the commit in both
+paths, and keep the helper local to inode.c.
+
+Suggested-by: Jan Kara <jack@suse.cz>
+Signed-off-by: shuo chen <1289151713@qq.com>
+Reported-by: Farhad Alemi <farhad.alemi@berkeley.edu>
+Reported-by: syzbot+f111db4cb2acd44eb2f4@syzkaller.appspotmail.com
+Link: https://lore.kernel.org/all/tencent_87F5A404ED65B0B1349C60E830C485716705@qq.com/
+Closes: https://lore.kernel.org/linux-ext4/CA+0ovCgxFN3TLpdS_O_Z48sARuQ-WR-JLDCqQWEmd9ELtkzddA@mail.gmail.com/T/
+Closes: https://syzkaller.appspot.com/bug?extid=f111db4cb2acd44eb2f4
+Signed-off-by: YOUR NAME <your@email>
+---
+--- a/fs/ext4/inode.c
++++ b/fs/ext4/inode.c
+@@ -56,8 +56,9 @@
+ static void ext4_journalled_zero_new_buffers(handle_t *handle,
+ 					    struct inode *inode,
+ 					    struct folio *folio,
+ 					    unsigned from, unsigned to);
++static void ext4_wait_for_tail_page_commit(struct inode *inode);
+ 
+ static __u32 ext4_inode_csum(struct inode *inode, struct ext4_inode *raw,
+ 			      struct ext4_inode_info *ei)
+ {
+@@ -1513,8 +1514,10 @@
+ 			ext4_orphan_add(handle, inode);
+ 
+ 		ext4_journal_stop(handle);
+ 		if (extended) {
++			if (ext4_should_journal_data(inode))
++				ext4_wait_for_tail_page_commit(inode);
+ 			ext4_truncate_failed_write(inode);
+ 			/*
+ 			 * If truncate failed early the inode might
+ 			 * still be on the orphan list; we need to
+@@ -1722,8 +1725,13 @@
+ 	ret2 = ext4_journal_stop(handle);
+ 	if (!ret)
+ 		ret = ret2;
+ 	if (pos + len > inode->i_size && !verity) {
++		/*
++		 * The folio straddling i_size may still have buffers attached
++		 * to the committing transaction.
++		 */
++		ext4_wait_for_tail_page_commit(inode);
+ 		ext4_truncate_failed_write(inode);
+ 		/*
+ 		 * If truncate failed early the inode might still be
+ 		 * on the orphan list; we need to make sure the inode

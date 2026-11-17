@@ -1,0 +1,138 @@
+From 4a09ae0d8448eb514b8ae8d6845ae0f6b8dcb1b9 Mon Sep 17 00:00:00 2001
+From: Aibing Chen <chenaibing@cmss.chinamobile.com>
+Date: Sat, 14 Nov 2026 17:14:36 +0800
+Subject: [PATCH net v3] net: hso: fix stashed tx skb leak and replay race
+
+hso_net_start_xmit() stashes the skb in odev->skb_tx_buf and stops the
+queue when hso_get_activity() reports -EAGAIN, which happens when the
+USB device is suspended or no longer configured.  If the interface is
+then brought down, or the device is disconnected, that skb is simply
+left behind: hso_net_close() and hso_free_net_device() never release
+it, and hso_net_open() clears the pointer, so the skb and its data
+buffer are leaked.
+
+hso_resume() loses a frame in the same way when the device is still not
+ready: it passes skb_tx_buf to hso_net_start_xmit() and then clears the
+pointer unconditionally, so a frame stashed again by that call is never
+freed.
+
+Take the stashed skb with xchg() in both paths so that only one of them
+can obtain it, and serialize the replay in hso_resume() against
+hso_net_close() with a per-interface mutex: either the frame is replayed
+before the device is stopped, or hso_net_close() takes and drops it.
+The state check uses test_bit(HSO_NET_RUNNING), the bit that
+hso_net_open() and hso_net_close() maintain.
+
+Reported-by: syzbot+bf62ca9997f43d2fa521@syzkaller.appspotmail.com
+Link: https://lore.kernel.org/all/6af74e31.fe96acdb.12252b.0009.GAE@google.com/
+Fixes: 72dc1c096c70 ("HSO: add option hso driver")
+Fixes: c213f286f2cf ("[netdrvr] hso: dev_kfree_skb crash fix")
+Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
+---
+v3:
+- serialize the replay in hso_resume() against hso_net_close() with a
+  per-interface mutex, closing the window between xchg() and the replay.
+- check HSO_NET_RUNNING (the bit hso_net_open() and hso_net_close()
+  maintain) instead of the IFF_UP alias in hso_resume().
+
+v2:
+- take the stashed skb with xchg() so that only one path can free it.
+- add the two Fixes tags.
+
+ drivers/net/usb/hso.c | 41 +++++++++++++++++++++++++++++++++--------
+ 1 file changed, 33 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/net/usb/hso.c b/drivers/net/usb/hso.c
+index 71caa3764..43884234c 100644
+--- a/drivers/net/usb/hso.c
++++ b/drivers/net/usb/hso.c
+@@ -142,6 +142,9 @@ struct hso_net {
+ 	struct sk_buff *skb_rx_buf;
+ 	struct sk_buff *skb_tx_buf;
+ 
++	/* serializes the hso_resume() replay with hso_net_close() */
++	struct mutex tx_replay_lock;
++
+ 	enum pkt_parse_state rx_parse_state;
+ 	spinlock_t net_lock;
+ 
+@@ -720,6 +723,14 @@ static int hso_net_open(struct net_device *net)
+ static int hso_net_close(struct net_device *net)
+ {
+ 	struct hso_net *odev = netdev_priv(net);
++	struct sk_buff *skb;
++
++	/*
++	 * Serialize with the replay in hso_resume(): either the frame is
++	 * replayed before we stop the device, or it is taken and dropped
++	 * here, never both and never after the queue is gone.
++	 */
++	mutex_lock(&odev->tx_replay_lock);
+ 
+ 	/* we don't need the queue anymore */
+ 	netif_stop_queue(net);
+@@ -728,6 +739,11 @@ static int hso_net_close(struct net_device *net)
+ 
+ 	hso_stop_net_device(odev->parent);
+ 
++	skb = xchg(&odev->skb_tx_buf, NULL);
++	dev_kfree_skb(skb);
++
++	mutex_unlock(&odev->tx_replay_lock);
++
+ 	/* done */
+ 	return 0;
+ }
+@@ -2398,6 +2414,7 @@ static void hso_net_init(struct net_device *net)
+ 
+ 	/* and initialize the semaphore */
+ 	spin_lock_init(&hso_net->net_lock);
++	mutex_init(&hso_net->tx_replay_lock);
+ }
+ 
+ /* Adds a network device in the network device table */
+@@ -3032,6 +3049,7 @@ static int hso_resume(struct usb_interface *iface)
+ {
+ 	int i, result = 0;
+ 	struct hso_net *hso_net;
++	struct sk_buff *skb;
+ 
+ 	/* Start all serial ports */
+ 	for (i = 0; i < HSO_SERIAL_TTY_MINORS; i++) {
+@@ -3051,21 +3069,28 @@ static int hso_resume(struct usb_interface *iface)
+ 		if (network_table[i] &&
+ 		    (network_table[i]->interface == iface)) {
+ 			hso_net = dev2net(network_table[i]);
+-			if (hso_net->flags & IFF_UP) {
+-				/* First transmit any lingering data,
+-				   then restart the device. */
+-				if (hso_net->skb_tx_buf) {
++			mutex_lock(&hso_net->tx_replay_lock);
++
++			/*
++			 * First transmit any lingering data, then restart
++			 * the device.
++			 */
++			if (test_bit(HSO_NET_RUNNING, &hso_net->flags)) {
++				skb = xchg(&hso_net->skb_tx_buf, NULL);
++				if (skb) {
+ 					dev_dbg(&iface->dev,
+ 						"Transmitting"
+ 						" lingering data\n");
+-					hso_net_start_xmit(hso_net->skb_tx_buf,
+-							   hso_net->net);
+-					hso_net->skb_tx_buf = NULL;
++					hso_net_start_xmit(skb, hso_net->net);
+ 				}
+ 				result = hso_start_net_device(network_table[i]);
+-				if (result)
++				if (result) {
++					mutex_unlock(&hso_net->tx_replay_lock);
+ 					goto out;
++				}
+ 			}
++
++			mutex_unlock(&hso_net->tx_replay_lock);
+ 		}
+ 	}
+ 

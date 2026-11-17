@@ -1,0 +1,36 @@
+From ac4b3c0eab428791fe0fdbdced322e86c8a68dab Mon Sep 17 00:00:00 2001
+From: Aibing Chen <chenaibing@cmss.chinamobile.com>
+Date: Sat, 14 Nov 2026 20:03:24 +0800
+Subject: [PATCH] EDAC/octeon: enlarge the L2C error message buffer
+
+_octeon_l2c_poll_oct2() builds an error message by prefixing buf1 with a
+short description.  buf1 holds up to 63 characters and the longest
+prefix is 33 characters ("Tag Single bit error (corrected):"), so the
+message needs up to 97 bytes, but buf2 is only 80 bytes.
+
+Building with W=1 reports a -Wformat-truncation warning for each of the
+six snprintf() calls, e.g. for "L2D Double bit error (detected):%s" the
+compiler notes that the output can reach 97 bytes including the
+terminator, into a destination of size 80.  The printed message then
+loses the syndrome, type and way information that buf1 carries.
+
+Size buf2 for the worst case.
+
+Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
+---
+ drivers/edac/octeon_edac-l2c.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/edac/octeon_edac-l2c.c b/drivers/edac/octeon_edac-l2c.c
+index e6b1595a3..5eca6e204 100644
+--- a/drivers/edac/octeon_edac-l2c.c
++++ b/drivers/edac/octeon_edac-l2c.c
+@@ -62,7 +62,7 @@ static void _octeon_l2c_poll_oct2(struct edac_device_ctl_info *l2c, int tad)
+ 	union cvmx_l2c_err_tdtx err_tdtx, err_tdtx_reset;
+ 	union cvmx_l2c_err_ttgx err_ttgx, err_ttgx_reset;
+ 	char buf1[64];
+-	char buf2[80];
++	char buf2[128];
+ 
+ 	err_tdtx_reset.u64 = 0;
+ 	err_tdtx.u64 = cvmx_read_csr(CVMX_L2C_ERR_TDTX(tad));

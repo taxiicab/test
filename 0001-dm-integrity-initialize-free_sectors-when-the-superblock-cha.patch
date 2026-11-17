@@ -1,0 +1,54 @@
+From f10ff9821485d95d404285eefaec258b1c8b0461 Mon Sep 17 00:00:00 2001
+From: Aibing Chen <chenaibing@cmss.chinamobile.com>
+Date: Sun, 15 Nov 2026 11:57:05 +0800
+Subject: [PATCH] dm-integrity: initialize free_sectors when the superblock
+ changes on resume
+
+fc79aeb86a2c ("dm-integrity: validate the superblock on resume") made
+dm_integrity_resume() jump to skip_writes when the on-disk superblock was
+modified while the device was suspended.  That path skips
+replay_journal(), so the journal accounting variables stay
+zero-initialized: free_sectors is 0 while journal_sections and
+journal_section_entries are nonzero.
+
+A later suspend or flush queues integrity_commit(), which calls
+pad_uncommitted() in journal mode.  Its invariant
+
+  journal_sections * journal_section_entries ==
+  (n_uncommitted_sections + n_committed_sections) *
+  journal_section_entries + free_sectors
+
+no longer holds because the right-hand side evaluates to 0, and WARN_ON
+fires.
+
+Restore free_sectors on that error path, as replay_journal() does for the
+normal resume.  The section counters are already zero and nothing will be
+committed, since the device is marked failed.
+
+Reported-by: syzbot+94dac3c75477e184f0b0@syzkaller.appspotmail.com
+Closes: https://syzkaller.appspot.com/bug?extid=94dac3c75477e184f0b0
+Fixes: fc79aeb86a2c ("dm-integrity: validate the superblock on resume")
+Cc: stable@vger.kernel.org
+Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
+---
+ drivers/md/dm-integrity.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/md/dm-integrity.c b/drivers/md/dm-integrity.c
+index 802b37761..6ab305b60 100644
+--- a/drivers/md/dm-integrity.c
++++ b/drivers/md/dm-integrity.c
+@@ -3915,6 +3915,13 @@ static void dm_integrity_resume(struct dm_target *ti)
+ 		memcpy(ic->sb, ic->sb_copy, sizeof(struct superblock));
+ 		DMERR("The superblock was changed while the device was suspended");
+ 		dm_integrity_io_error(ic, "superblock check", -EINVAL);
++		/*
++		 * replay_journal() is skipped below, so the journal accounting stays
++		 * zero-initialized and pad_uncommitted() would trigger its WARN_ON.
++		 * Restore the free sector count; the section counters are already zero
++		 * and nothing is committed because the device is marked failed.
++		 */
++		ic->free_sectors = ic->journal_entries;
+ 		goto skip_writes;
+ 	}
+ 
