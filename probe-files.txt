@@ -1,2 +1,2 @@
-# baseline
-drivers/input/joystick/adi.o
+# directory scan targets
+drivers/input/
