@@ -1,2 +1,1 @@
-drivers/edac/skx_common.o
-drivers/edac/sb_edac.o
+drivers/input/joystick/adi.o
