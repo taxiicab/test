@@ -1,38 +1,38 @@
-From: Jiahao Xu <xujiahao@cmss.chinamobile.com>
-To: Borislav Petkov <bp@alien8.de>, Tony Luck <tony.luck@intel.com>
-Cc: Qiuxu Zhuo <qzhuo@nvidia.com>, linux-edac@vger.kernel.org,
-    linux-kernel@vger.kernel.org
-Subject: [PATCH] EDAC: enlarge the DIMM label buffer so the widest format fits
+From f75af92e00362ca5950dd05eb080fd4daf8e4bd9 Mon Sep 17 00:00:00 2001
+From: Aibing Chen <chenaibing@cmss.chinamobile.com>
+Date: Thu, 26 Nov 2026 13:03:54 +0800
+Subject: [PATCH] EDAC: enlarge the DIMM label buffer to cover the worst case
 
-The DIMM labels are assembled with snprintf() into
-label[EDAC_MC_LABEL_LEN + 1], a 32-byte buffer, with formats such as
+The DIMM labels are assembled with snprintf() into label[EDAC_MC_LABEL_LEN
++ 1], a 32 byte array, with formats such as
 "CPU_SrcID#%u_MC#%u_Chan#%u_DIMM#%u" in skx_common.c and
 "CPU_SrcID#%u_Ha#%u_Chan#%u_DIMM#%u" in sb_edac.c.
 
-The compiler cannot see that the source ids come from 3-bit PCI
-configuration space fields (skx_get_src_id() masks bits 12..14) and
-that the channel and slot indices are small, so it computes a worst
-case of 34 characters plus the terminator, one byte more than the
-buffer holds, and reports it in a W=1 build:
+The worst case gcc computes for these formats is 34 characters plus the
+terminator, i.e. 35 bytes, while the array only holds 32.  The labels fit
+in practice, but -Wformat-truncation is enabled for W=1 builds and
+COMPILE_TEST configurations turn it into an error through CONFIG_WERROR,
+so these two files do not build today:
 
-  drivers/edac/skx_common.c:790:87: warning: '_DIMM#' directive output
-    may be truncated writing 6 bytes into a region of size between 0
-    and 9 [-Wformat-truncation=]
-  drivers/edac/skx_common.c:839:79: warning: '_DIMM#' directive output
-    may be truncated writing 6 bytes into a region of size between 0
-    and 9 [-Wformat-truncation=]
-  drivers/edac/sb_edac.c:1670:85: warning: 'snprintf' output may be
-    truncated before the last format character [-Wformat-truncation=]
+  drivers/edac/skx_common.c:790:87: error: '_DIMM#' directive output may
+    be truncated writing 6 bytes into a region of size between 0 and 9
+    [-Werror=format-truncation=]
+  drivers/edac/skx_common.c:839:79: error: '_DIMM#' directive output may
+    be truncated writing 6 bytes into a region of size between 0 and 9
+    [-Werror=format-truncation=]
+  drivers/edac/sb_edac.c:1670:85: error: 'snprintf' output may be
+    truncated before the last format character
+    [-Werror=format-truncation=]
 
-The labels fit in practice, but the buffer is one byte short of what
-the compiler is allowed to assume, so raise EDAC_MC_LABEL_LEN to 34.
-The label array of struct edac_raw_error_desc and the stack buffers of
-the three drivers that size them with this constant grow by the same
+Raise EDAC_MC_LABEL_LEN to 34 so that label[] is 35 bytes and covers the
+worst case: struct dimm_info and struct edac_raw_error_desc grow by three
+bytes per label, 24 bytes for the eight labels of the latter, and the
+stack buffers that the drivers size with this constant grow by the same
 three bytes.
 
 No functional change.
 
-Signed-off-by: Jiahao Xu <xujiahao@cmss.chinamobile.com>
+Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
 ---
  include/linux/edac.h | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
