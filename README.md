@@ -25,10 +25,16 @@ either way, so reading them only needs `git fetch origin ci-logs`.
 | `0001-md-raid1-reject-oversized-raid_disks-values.patch` | md/raid1: reject oversized raid_disks values (v2) |
 | `0001-net-mlx5-fix-a-stack-over-read-in-the-QP-debugfs.patch` | net/mlx5: fix a stack over-read in the QP debugfs (v2) |
 | `0001-ntfs3-avoid-freeing-the-primary-MFT-record-during-attribute-.patch` | ntfs3: avoid freeing the primary MFT record |
-| `0001-squashfs-return-EINVAL-on-invalid-directory-inode-size.patch` | squashfs: return -EINVAL on invalid directory inode size |
-| `0002-squashfs-return-EIO-on-out-of-bounds-directory-entry-in-lookup.patch` | squashfs: return -EIO on out of bounds directory entry |
 
 `archive/` keeps withdrawn or rejected patches for reference; they are not applied.
+
+## linux-next workflow
+
+squashfs 1/2 and 2/2 depend on a commit that is still only in linux-next, so
+they live in patches-next/ and are verified by .github/workflows/linux-next.yml,
+which applies them to 
+ext/linux-next.git and builds s/squashfs/*.o.
+Logs go to the ci-logs-next branch.
 
 ## Reading the results locally
 

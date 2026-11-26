@@ -1,0 +1,83 @@
+name: linux-next-verify
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  squashfs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential bc bison flex \
+            libssl-dev libelf-dev libncurses-dev zstd
+
+      - name: Fetch linux-next
+        run: |
+          mkdir -p ci-logs-next
+          git clone --depth 1 --filter=blob:none \
+            https://git.kernel.org/pub/scm/linux/kernel/git/next/linux-next.git \
+            "$RUNNER_TEMP/next"
+          git -C "$RUNNER_TEMP/next" log -1 \
+            --format='%H%n%ad%n%s' --date=iso > ci-logs-next/base.txt
+          cat ci-logs-next/base.txt
+
+      - name: Apply squashfs patches
+        run: |
+          cd "$RUNNER_TEMP/next"
+          : > "$GITHUB_WORKSPACE/ci-logs-next/apply.log"
+          rc=0
+          for p in "$GITHUB_WORKSPACE"/patches-next/*.patch; do
+            name=$(basename "$p")
+            echo "=== $name" >> "$GITHUB_WORKSPACE/ci-logs-next/apply.log"
+            if git apply -v "$p" >> "$GITHUB_WORKSPACE/ci-logs-next/apply.log" 2>&1; then
+              echo "OK   $name" >> "$GITHUB_WORKSPACE/ci-logs-next/apply.log"
+            else
+              echo "FAIL $name" >> "$GITHUB_WORKSPACE/ci-logs-next/apply.log"
+              rc=1
+            fi
+          done
+          cat "$GITHUB_WORKSPACE/ci-logs-next/apply.log"
+          exit $rc
+
+      - name: Configure and compile squashfs
+        run: |
+          cd "$RUNNER_TEMP/next"
+          make defconfig
+          make -j"$(nproc)" prepare > "$GITHUB_WORKSPACE/ci-logs-next/prepare.log" 2>&1
+          : > "$GITHUB_WORKSPACE/ci-logs-next/build.log"
+          rc=0
+          for obj in fs/squashfs/namei.o fs/squashfs/inode.o fs/squashfs/export.o fs/squashfs/dir.o fs/squashfs/super.o; do
+            echo "=== make W=1 $obj" >> "$GITHUB_WORKSPACE/ci-logs-next/build.log"
+            if make W=1 -j"$(nproc)" "$obj" >> "$GITHUB_WORKSPACE/ci-logs-next/build.log" 2>&1; then
+              echo "OK   $obj" >> "$GITHUB_WORKSPACE/ci-logs-next/build.log"
+            else
+              echo "FAIL $obj" >> "$GITHUB_WORKSPACE/ci-logs-next/build.log"
+              rc=1
+            fi
+          done
+          echo "RESULT=$rc" >> "$GITHUB_WORKSPACE/ci-logs-next/build.log"
+          tail -n 30 "$GITHUB_WORKSPACE/ci-logs-next/build.log"
+          exit $rc
+
+      - name: Publish logs
+        if: always()
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          git config user.name "kbuild-ci"
+          git config user.email "kbuild-ci@users.noreply.github.com"
+          git checkout -B ci-logs-next
+          git add -f ci-logs-next
+          git commit -m "ci: linux-next logs for ${GITHUB_SHA}" || echo "nothing to commit"
+          git push --force origin ci-logs-next
