@@ -49,3 +49,19 @@ boot test with:
 
 The commit must be pushed here first and the repository must be reachable by
 syzbot (public).
+
+## Result log (2026-11-26)
+
+Base tree: `torvalds/linux` master, cloned at run time.
+
+| Patch | Apply | `make W=1` object |
+|---|---|---|
+| net: hso: fix stashed tx skb leak and replay race (v4) | OK | `drivers/net/usb/hso.o` OK |
+| net: hso: cap the MTU and drop oversized frames (v2) | OK | `drivers/net/usb/hso.o` OK |
+| net/rds: defer CM id destruction to a workqueue (v4) | OK | `net/rds/ib.o` OK |
+| md/raid1: reject oversized raid_disks values (v2) | OK | `drivers/md/raid1.o` OK |
+| net/mlx5: fix a stack over-read in the QP debugfs (v2) | OK | `.../mlx5/core/debugfs.o` OK |
+| ntfs3: avoid freeing the primary MFT record | OK | (covered by fs/ntfs3 build) |
+| squashfs 1/2, 2/2 | **FAIL** | not applied; they target an unmerged linux-next commit (`5213b0a08263`) and need a rebase onto mainline |
+
+`make W=1` produced **no warnings** for any of the compiled objects.
