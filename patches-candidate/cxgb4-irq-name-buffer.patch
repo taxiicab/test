@@ -1,0 +1,53 @@
+From 938a222b8cad126602bcafce5b577404b1b18ce3 Mon Sep 17 00:00:00 2001
+From: Aibing Chen <chenaibing@cmss.chinamobile.com>
+Date: Thu, 26 Nov 2026 14:04:17 +0800
+Subject: [PATCH net-next] cxgb4: avoid truncating the MSI-X interrupt names
+
+The MSI-X interrupt names are assembled with snprintf() into
+adap->msix_info[].desc[IFNAMSIZ + 10], from adap->port[0]->name (up to
+IFNAMSIZ - 1 characters) plus a suffix and a queue index:
+
+  "%s-Rx%d"         needs up to 30 bytes
+  "%s-mirrorrxq%d"  needs up to 37 bytes
+  "%s-%s%d"         needs up to 43 bytes
+
+The last one also formats the ULD queue name, which is copied from the
+ULD with memcpy(rxq_info->name, uld_info->name, IFNAMSIZ) into a
+char[IFNAMSIZ] field, so it can be up to IFNAMSIZ - 1 characters as well.
+
+Because -Wformat-truncation is enabled for W=1 builds and COMPILE_TEST
+configurations turn it into an error through CONFIG_WERROR, the driver
+does not build today:
+
+  cxgb4_main.c:1074:48: error: '%d' directive output may be truncated
+    writing between 1 and 11 bytes into a region of size between 8 and
+    23 [-Werror=format-truncation=]
+  cxgb4_main.c:1356:47: error: '%d' directive output may be truncated
+    writing between 1 and 5 bytes into a region of size between 1 and 16
+  cxgb4_uld.c:141:38: error: '%s' directive output may be truncated
+    writing up to 15 bytes into a region of size between 10 and 25
+
+Size desc[] for the worst case, 42 characters plus the terminator, which
+is IFNAMSIZ + 27 bytes.
+
+Compile tested only, with W=1 before and after the change; no Chelsio
+hardware was available to exercise the driver.
+
+Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
+---
+ drivers/net/ethernet/chelsio/cxgb4/cxgb4.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/net/ethernet/chelsio/cxgb4/cxgb4.h b/drivers/net/ethernet/chelsio/cxgb4/cxgb4.h
+index f20f4bc58..dda787b8d 100644
+--- a/drivers/net/ethernet/chelsio/cxgb4/cxgb4.h
++++ b/drivers/net/ethernet/chelsio/cxgb4/cxgb4.h
+@@ -1049,7 +1049,7 @@ struct msix_bmap {
+ 
+ struct msix_info {
+ 	unsigned short vec;
+-	char desc[IFNAMSIZ + 10];
++	char desc[IFNAMSIZ + 27];
+ 	unsigned int idx;
+ 	cpumask_var_t aff_mask;
+ };
