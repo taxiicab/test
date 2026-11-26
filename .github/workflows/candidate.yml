@@ -1,0 +1,89 @@
+name: candidate-verify
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential bc bison flex \
+            libssl-dev libelf-dev libncurses-dev zstd
+
+      - name: Fetch kernel source
+        run: |
+          mkdir -p ci-logs-candidate
+          git clone --depth 1 --filter=blob:none \
+            https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git \
+            "$RUNNER_TEMP/linux"
+          git -C "$RUNNER_TEMP/linux" log -1 \
+            --format='%H%n%ad%n%s' --date=iso > ci-logs-candidate/base.txt
+          cat ci-logs-candidate/base.txt
+
+      - name: Apply candidate patches
+        run: |
+          cd "$RUNNER_TEMP/linux"
+          : > "$GITHUB_WORKSPACE/ci-logs-candidate/apply.log"
+          rc=0
+          shopt -s nullglob
+          for p in "$GITHUB_WORKSPACE"/patches-candidate/*.patch; do
+            name=$(basename "$p")
+            echo "=== $name" >> "$GITHUB_WORKSPACE/ci-logs-candidate/apply.log"
+            if git apply -v "$p" >> "$GITHUB_WORKSPACE/ci-logs-candidate/apply.log" 2>&1; then
+              echo "OK   $name" >> "$GITHUB_WORKSPACE/ci-logs-candidate/apply.log"
+            else
+              echo "FAIL $name" >> "$GITHUB_WORKSPACE/ci-logs-candidate/apply.log"
+              rc=1
+            fi
+          done
+          cat "$GITHUB_WORKSPACE/ci-logs-candidate/apply.log"
+          exit $rc
+
+      - name: Configure and build targets
+        run: |
+          cd "$RUNNER_TEMP/linux"
+          make allmodconfig
+          make -j"$(nproc)" prepare > "$GITHUB_WORKSPACE/ci-logs-candidate/prepare.log" 2>&1
+          : > "$GITHUB_WORKSPACE/ci-logs-candidate/build.log"
+          rc=0
+          while IFS= read -r obj; do
+            [ -z "$obj" ] && continue
+            case "$obj" in \#*) continue ;; esac
+            for flags in "W=1"; do
+              echo "=== make $flags $obj" >> "$GITHUB_WORKSPACE/ci-logs-candidate/build.log"
+              rm -f "$obj"
+              if make $flags -j"$(nproc)" "$obj" >> "$GITHUB_WORKSPACE/ci-logs-candidate/build.log" 2>&1; then
+                echo "OK   [$flags] $obj" >> "$GITHUB_WORKSPACE/ci-logs-candidate/build.log"
+              else
+                echo "FAIL [$flags] $obj" >> "$GITHUB_WORKSPACE/ci-logs-candidate/build.log"
+                rc=1
+              fi
+            done
+          done < "$GITHUB_WORKSPACE/candidate-targets.txt"
+          echo "RESULT=$rc" >> "$GITHUB_WORKSPACE/ci-logs-candidate/build.log"
+          grep -nE 'warning:|error:' "$GITHUB_WORKSPACE/ci-logs-candidate/build.log" || echo "no warnings"
+          exit $rc
+
+      - name: Publish logs
+        if: always()
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          git config user.name "kbuild-ci"
+          git config user.email "kbuild-ci@users.noreply.github.com"
+          git checkout -B ci-logs-candidate
+          git add -f ci-logs-candidate
+          git commit -m "ci: candidate logs for ${GITHUB_SHA}" || echo "nothing to commit"
+          git push --force origin ci-logs-candidate

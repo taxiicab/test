@@ -1,0 +1,41 @@
+From: Jiahao Xu <xujiahao@cmss.chinamobile.com>
+To: Dmitry Torokhov <dmitry.torokhov@gmail.com>
+Cc: linux-input@vger.kernel.org, linux-kernel@vger.kernel.org
+Subject: [PATCH] Input: cobra - use scnprintf() for the device phys name
+
+cobra_connect() composes the physical path of each port as
+"%s/input%d" from gameport->phys into a 32-byte array.  gameport->phys
+is a 32-byte string and the port number is an int, so the worst case is
+31 + 6 + 10 characters plus the terminator and does not fit.  The
+result is informational only and is truncated on these devices today,
+which is fine; use scnprintf() so that the helper makes it explicit
+that the output is bounded by the buffer.
+
+This also silences the W=1 warning:
+
+  drivers/input/joystick/cobra.c:184:29: warning: '/input' directive
+    output may be truncated writing 6 bytes into a region of size
+    between 1 and 32 [-Wformat-truncation=]
+
+No functional change.
+
+Signed-off-by: Jiahao Xu <xujiahao@cmss.chinamobile.com>
+---
+ drivers/input/joystick/cobra.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/input/joystick/cobra.c b/drivers/input/joystick/cobra.c
+index ffa6d49c8..52331a947 100644
+--- a/drivers/input/joystick/cobra.c
++++ b/drivers/input/joystick/cobra.c
+@@ -180,8 +180,8 @@ static int cobra_connect(struct gameport *gameport, struct gameport_driver *drv)
+ 			goto fail3;
+ 		}
+ 
+-		snprintf(cobra->phys[i], sizeof(cobra->phys[i]),
+-			 "%s/input%d", gameport->phys, i);
++		scnprintf(cobra->phys[i], sizeof(cobra->phys[i]),
++			  "%s/input%d", gameport->phys, i);
+ 
+ 		input_dev->name = "Creative Labs Blaster GamePad Cobra";
+ 		input_dev->phys = cobra->phys[i];
