@@ -1,1 +1,1 @@
-﻿drivers/input/joystick/cobra.o
+drivers/input/joystick/cobra.o

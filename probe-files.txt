@@ -1,2 +1,2 @@
-﻿# one object per line; compiled with make W=1 on torvalds/master
+# one object per line
 drivers/input/joystick/cobra.o
