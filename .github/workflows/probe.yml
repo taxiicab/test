@@ -47,13 +47,16 @@ jobs:
           while IFS= read -r obj; do
             [ -z "$obj" ] && continue
             case "$obj" in \#*) continue ;; esac
-            echo "=== make W=1 $obj" >> "$GITHUB_WORKSPACE/ci-logs-probe/build.log"
-            if make W=1 -j"$(nproc)" "$obj" >> "$GITHUB_WORKSPACE/ci-logs-probe/build.log" 2>&1; then
-              echo "OK   $obj" >> "$GITHUB_WORKSPACE/ci-logs-probe/build.log"
-            else
-              echo "FAIL $obj" >> "$GITHUB_WORKSPACE/ci-logs-probe/build.log"
-              rc=1
-            fi
+            for flags in "" "W=1"; do
+              echo "=== make ${flags:-plain} $obj" >> "$GITHUB_WORKSPACE/ci-logs-probe/build.log"
+              rm -f "$obj"
+              if make $flags -j"$(nproc)" "$obj" >> "$GITHUB_WORKSPACE/ci-logs-probe/build.log" 2>&1; then
+                echo "OK   [${flags:-plain}] $obj" >> "$GITHUB_WORKSPACE/ci-logs-probe/build.log"
+              else
+                echo "FAIL [${flags:-plain}] $obj" >> "$GITHUB_WORKSPACE/ci-logs-probe/build.log"
+                rc=1
+              fi
+            done
           done < "$GITHUB_WORKSPACE/probe-files.txt"
           echo "RESULT=$rc" >> "$GITHUB_WORKSPACE/ci-logs-probe/build.log"
           grep -nE 'warning:|error:' "$GITHUB_WORKSPACE/ci-logs-probe/build.log" || echo "no warnings"
