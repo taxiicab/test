@@ -1,0 +1,71 @@
+name: probe-verify
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential bc bison flex \
+            libssl-dev libelf-dev libncurses-dev zstd
+
+      - name: Fetch kernel source
+        run: |
+          mkdir -p ci-logs-probe
+          git clone --depth 1 --filter=blob:none \
+            https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git \
+            "$RUNNER_TEMP/linux"
+          git -C "$RUNNER_TEMP/linux" log -1 \
+            --format='%H%n%ad%n%s' --date=iso > ci-logs-probe/base.txt
+          cat ci-logs-probe/base.txt
+
+      - name: Configure kernel
+        run: |
+          cd "$RUNNER_TEMP/linux"
+          make allmodconfig
+          make -j"$(nproc)" prepare > "$GITHUB_WORKSPACE/ci-logs-probe/prepare.log" 2>&1
+
+      - name: Compile probe targets with W=1
+        run: |
+          cd "$RUNNER_TEMP/linux"
+          : > "$GITHUB_WORKSPACE/ci-logs-probe/build.log"
+          rc=0
+          while IFS= read -r obj; do
+            [ -z "$obj" ] && continue
+            case "$obj" in \#*) continue ;; esac
+            echo "=== make W=1 $obj" >> "$GITHUB_WORKSPACE/ci-logs-probe/build.log"
+            if make W=1 -j"$(nproc)" "$obj" >> "$GITHUB_WORKSPACE/ci-logs-probe/build.log" 2>&1; then
+              echo "OK   $obj" >> "$GITHUB_WORKSPACE/ci-logs-probe/build.log"
+            else
+              echo "FAIL $obj" >> "$GITHUB_WORKSPACE/ci-logs-probe/build.log"
+              rc=1
+            fi
+          done < "$GITHUB_WORKSPACE/probe-files.txt"
+          echo "RESULT=$rc" >> "$GITHUB_WORKSPACE/ci-logs-probe/build.log"
+          grep -nE 'warning:|error:' "$GITHUB_WORKSPACE/ci-logs-probe/build.log" || echo "no warnings"
+          exit $rc
+
+      - name: Publish logs
+        if: always()
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          git config user.name "kbuild-ci"
+          git config user.email "kbuild-ci@users.noreply.github.com"
+          git checkout -B ci-logs-probe
+          git add -f ci-logs-probe
+          git commit -m "ci: probe logs for ${GITHUB_SHA}" || echo "nothing to commit"
+          git push --force origin ci-logs-probe
