@@ -1,3 +1,2 @@
 # baseline
-drivers/net/ethernet/chelsio/cxgb4/cxgb4_main.o
-drivers/net/ethernet/chelsio/cxgb4/cxgb4_uld.o
+drivers/input/joystick/adi.o
