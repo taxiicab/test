@@ -1,1 +1,2 @@
-drivers/input/joystick/cobra.o
+drivers/edac/skx_common.o
+drivers/edac/sb_edac.o

@@ -1,2 +1,3 @@
-# one object per line
-drivers/input/joystick/cobra.o
+# baseline objects
+drivers/edac/skx_common.o
+drivers/edac/sb_edac.o
