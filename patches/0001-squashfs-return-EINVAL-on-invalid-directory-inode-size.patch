@@ -1,0 +1,64 @@
+From 8b8f13509c54bf169c29e3ffb619f23d227e16e4 Mon Sep 17 00:00:00 2001
+From: Aibing Chen <chenaibing@cmss.chinamobile.com>
+Date: Sat, 14 Nov 2026 22:15:51 +0800
+Subject: [PATCH 1/2] squashfs: return -EINVAL on invalid directory inode size
+
+Commit 5213b0a08263 ("Squashfs: fix variables in directory code and
+add more sanity checks") added validation of directory inode sizes to
+squashfs_read_inode(), but the two new "i_size < 3" checks jump to
+failed_read without setting err.  At that point err holds the number
+of bytes read by squashfs_read_metadata() (32 for a directory inode,
+40 for a long directory inode), so squashfs_read_inode() returns a
+positive value.
+
+squashfs_iget() wraps that in ERR_PTR(), and IS_ERR() does not catch
+positive values, so the VFS happily uses the bogus "inode" pointer
+and crashes:
+
+  general protection fault in __d_obtain_alias ...
+  RIP: __d_obtain_alias+0x50/0x880 fs/dcache.c:2359
+  ...
+  squashfs_export_iget fs/squashfs/export.c:117 [inline]
+  ...
+
+Return -EINVAL on the two new error paths.
+
+Reported-by: syzbot+5d7ba5f6127ed887f459@syzkaller.appspotmail.com
+Closes: https://syzkaller.appspot.com/bug?extid=5d7ba5f6127ed887f459
+Fixes: 5213b0a08263 ("Squashfs: fix variables in directory code and add more sanity checks")
+Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
+---
+ fs/squashfs/inode.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/fs/squashfs/inode.c b/fs/squashfs/inode.c
+index 5404d7ba6..4cf8a41b5 100644
+--- a/fs/squashfs/inode.c
++++ b/fs/squashfs/inode.c
+@@ -255,8 +255,10 @@ int squashfs_read_inode(struct inode *inode, long long ino)
+ 
+ 		/* The directory size must be 3 or larger, as it includes "." and ".." entries */
+ 		inode->i_size = le16_to_cpu(sqsh_ino->file_size);
+-		if (inode->i_size < 3)
++		if (inode->i_size < 3) {
++			err = -EINVAL;
+ 			goto failed_read;
++		}
+ 
+ 		set_nlink(inode, le32_to_cpu(sqsh_ino->nlink));
+ 		inode->i_op = &squashfs_dir_inode_ops;
+@@ -284,8 +286,10 @@ int squashfs_read_inode(struct inode *inode, long long ino)
+ 
+ 		/* The directory size must be 3 or larger, as it includes "." and ".." entries */
+ 		inode->i_size = le32_to_cpu(sqsh_ino->file_size);
+-		if (inode->i_size < 3)
++		if (inode->i_size < 3) {
++			err = -EINVAL;
+ 			goto failed_read;
++		}
+ 
+ 		xattr_id = le32_to_cpu(sqsh_ino->xattr);
+ 		set_nlink(inode, le32_to_cpu(sqsh_ino->nlink));
+-- 
+2.50.1.windows.1
+

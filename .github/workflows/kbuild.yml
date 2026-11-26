@@ -1,0 +1,92 @@
+name: kbuild-verify
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential bc bison flex \
+            libssl-dev libelf-dev libncurses-dev zstd
+
+      - name: Fetch kernel source
+        run: |
+          git clone --depth 1 --filter=blob:none \
+            https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git \
+            "$RUNNER_TEMP/linux"
+          git -C "$RUNNER_TEMP/linux" log -1 --format='base: %h %s'
+
+      - name: Apply patches
+        run: |
+          mkdir -p ci-logs
+          cd "$RUNNER_TEMP/linux"
+          : > "$GITHUB_WORKSPACE/ci-logs/apply.log"
+          for p in "$GITHUB_WORKSPACE"/patches/*.patch; do
+            name=$(basename "$p")
+            echo "=== $name" >> "$GITHUB_WORKSPACE/ci-logs/apply.log"
+            if git apply --3way "$p" >> "$GITHUB_WORKSPACE/ci-logs/apply.log" 2>&1; then
+              echo "OK   $name" >> "$GITHUB_WORKSPACE/ci-logs/apply.log"
+            else
+              echo "FAIL $name" >> "$GITHUB_WORKSPACE/ci-logs/apply.log"
+            fi
+          done
+          cat "$GITHUB_WORKSPACE/ci-logs/apply.log"
+
+      - name: Configure kernel
+        run: |
+          cd "$RUNNER_TEMP/linux"
+          make allmodconfig
+          make -j"$(nproc)" prepare > "$GITHUB_WORKSPACE/ci-logs/prepare.log" 2>&1
+          grep -E 'CONFIG_USB_HSO|CONFIG_RDS_RDMA|CONFIG_WIREGUARD|CONFIG_MD_RAID1|CONFIG_MLX5_CORE|CONFIG_SQUASHFS' .config \
+            >> "$GITHUB_WORKSPACE/ci-logs/prepare.log" || true
+
+      - name: Compile target objects
+        run: |
+          cd "$RUNNER_TEMP/linux"
+          : > "$GITHUB_WORKSPACE/ci-logs/build.log"
+          rc=0
+          for obj in \
+            drivers/net/usb/hso.o \
+            net/rds/ib.o \
+            drivers/net/wireguard/peerlookup.o \
+            drivers/md/raid1.o \
+            drivers/net/ethernet/mellanox/mlx5/core/debugfs.o \
+            fs/squashfs/namei.o \
+            fs/squashfs/inode.o \
+            fs/squashfs/export.o ; do
+            echo "=== make W=1 $obj" >> "$GITHUB_WORKSPACE/ci-logs/build.log"
+            if make W=1 -j"$(nproc)" "$obj" >> "$GITHUB_WORKSPACE/ci-logs/build.log" 2>&1; then
+              echo "OK   $obj" >> "$GITHUB_WORKSPACE/ci-logs/build.log"
+            else
+              echo "FAIL $obj" >> "$GITHUB_WORKSPACE/ci-logs/build.log"
+              rc=1
+            fi
+          done
+          echo "RESULT=$rc" >> "$GITHUB_WORKSPACE/ci-logs/build.log"
+          tail -n 40 "$GITHUB_WORKSPACE/ci-logs/build.log"
+          exit $rc
+
+      - name: Publish logs to ci-logs branch
+        if: always()
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          git config user.name "kbuild-ci"
+          git config user.email "kbuild-ci@users.noreply.github.com"
+          git checkout -B ci-logs
+          git add -f ci-logs
+          git commit -m "ci: build logs for ${GITHUB_SHA}" || echo "nothing to commit"
+          git push --force origin ci-logs

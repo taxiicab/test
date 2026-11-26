@@ -1,0 +1,59 @@
+From 379c8b8b1a35acbfce3e793a4e9d0a5117aea378 Mon Sep 17 00:00:00 2001
+From: Aibing Chen <chenaibing@cmss.chinamobile.com>
+Date: Sat, 14 Nov 2026 23:30:52 +0800
+Subject: [PATCH] ntfs3: avoid freeing the primary MFT record during attribute
+ list removal
+
+ni_try_remove_attr_list() keeps a backup copy of the primary MFT record
+and, when moving an attribute out of a subrecord fails, restores it with
+swap(mrec, ni->mi.mrec) and frees the buffer that ni->mi.mrec used to
+point to.
+
+ntfs_readdir() now drops ni_lock before walking the root index header
+(commit 7a5aa6c45072), assuming that the header lives in the main record
+whose lifetime is bound to the inode.  Background writeback does not
+take i_rwsem: ni_write_inode() only needs ni_trylock(), which succeeds as
+soon as ntfs_readdir() has released the lock.  If the attribute list is
+dirty, writeback calls ni_try_remove_attr_list(), and the error path
+above frees the record that the unlocked reader is walking:
+
+  BUG: KASAN: slab-use-after-free in ntfs_read_hdr
+  Read of size 2 at ...
+  Freed by task ...:
+   kfree
+   ni_try_remove_attr_list
+   ni_write_inode
+   write_inode
+
+Restore the primary record contents in place with memcpy() so that the
+allocation stays alive for concurrent readers, and free only the backup
+copy.
+
+Reported-by: syzbot+7f14bc1da1f4da6518e5@syzkaller.appspotmail.com
+Closes: https://syzkaller.appspot.com/bug?extid=7f14bc1da1f4da6518e5
+Fixes: 7a5aa6c45072 ("ntfs3: release ni_lock before dir_emit in ntfs_readdir to fix deadlocks")
+Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
+---
+ fs/ntfs3/frecord.c | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/fs/ntfs3/frecord.c b/fs/ntfs3/frecord.c
+index 16ac847de..50c5d301b 100644
+--- a/fs/ntfs3/frecord.c
++++ b/fs/ntfs3/frecord.c
+@@ -755,8 +755,13 @@ static int ni_try_remove_attr_list(struct ntfs_inode *ni)
+ 	kfree(mrec);
+ 	return 0;
+ out:
+-	/* Restore primary record. */
+-	swap(mrec, ni->mi.mrec);
++	/*
++	 * Restore the primary record contents in place.  ntfs_readdir() walks
++	 * the root index header after releasing ni_lock (see commit 7a5aa6c45072),
++	 * so a concurrent reader may still hold pointers into this buffer; swapping
++	 * it out and freeing it would leave that reader with freed memory.
++	 */
++	memcpy(ni->mi.mrec, mrec, sbi->record_size);
+ 	kfree(mrec);
+ 	return 0;
+ }

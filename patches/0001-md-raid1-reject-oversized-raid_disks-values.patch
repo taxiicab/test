@@ -1,0 +1,73 @@
+From e82bc55a2b56f3131353965b45b2b988bdf55863 Mon Sep 17 00:00:00 2001
+From: Aibing Chen <chenaibing@cmss.chinamobile.com>
+Date: Wed, 18 Nov 2026 07:45:34 +0800
+Subject: [PATCH v2] md/raid1: reject oversized raid_disks values
+
+setup_conf(), raid1_reshape() and r1buf_pool_alloc() size the mirrors
+array, the r1bio pool and the resync buffer pool by raid_disks * 2.
+raid_disks is set from the user through the SET_ARRAY_INFO ioctl and is
+unbounded, so a large value makes one of those allocations exceed
+KMALLOC_MAX_SIZE: kmalloc emits a WARN_ON_ONCE_GFP() splat (syzbot:
+WARNING in r1buf_pool_alloc) and returns NULL.
+
+Cap raid_disks by the largest element size involved, and check the cap
+both in raid1_run(), before the pools are allocated, and in
+raid1_reshape(), which updates raid_disks on a running array through
+update_raid_disks().
+
+Reported-by: syzbot+c0e700c08ee88f60e54d@syzkaller.appspotmail.com
+Closes: https://syzkaller.appspot.com/bug?extid=c0e700c08ee88f60e54d
+Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
+---
+v2:
+- cap by max(sizeof(struct resync_pages), sizeof(struct raid1_info)) so
+  the mirrors array is covered on 64K page kernels as well.
+- add the same check to raid1_reshape(), which changes raid_disks on a
+  running array without going through raid1_run().
+
+ drivers/md/raid1.c | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/drivers/md/raid1.c b/drivers/md/raid1.c
+index 894efb50c..609c64d85 100644
+--- a/drivers/md/raid1.c
++++ b/drivers/md/raid1.c
+@@ -3152,6 +3152,18 @@ static int raid1_set_limits(struct mddev *mddev)
+ 	return queue_limits_set(mddev->gendisk->queue, &lim);
+ }
+ 
++/*
++ * setup_conf(), raid1_reshape() and r1buf_pool_alloc() size the mirrors
++ * array, the r1bio pool and the resync buffer pool by raid_disks * 2.
++ * Reject a disk count for which those allocations would exceed
++ * KMALLOC_MAX_SIZE instead of letting kmalloc warn and fail later.
++ */
++static int raid1_max_disks(void)
++{
++	return KMALLOC_MAX_SIZE /
++		(2 * max(sizeof(struct resync_pages), sizeof(struct raid1_info)));
++}
++
+ static int raid1_run(struct mddev *mddev)
+ {
+ 	struct r1conf *conf;
+@@ -3169,6 +3181,9 @@ static int raid1_run(struct mddev *mddev)
+ 		return -EIO;
+ 	}
+ 
++	if (mddev->raid_disks <= 0 || mddev->raid_disks > raid1_max_disks())
++		return -EINVAL;
++
+ 	/*
+ 	 * copy the already verified devices into our private RAID1
+ 	 * bookkeeping area. [whatever we allocate in run(),
+@@ -3318,6 +3333,9 @@ static int raid1_reshape(struct mddev *mddev)
+ 
+ 	raid_disks = mddev->raid_disks + mddev->delta_disks;
+ 
++	if (raid_disks <= 0 || raid_disks > raid1_max_disks())
++		return -EINVAL;
++
+ 	if (raid_disks < conf->raid_disks) {
+ 		cnt=0;
+ 		for (d= 0; d < conf->raid_disks; d++)

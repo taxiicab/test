@@ -1,0 +1,56 @@
+From 383942eeaf7c95af2183a88b7ab9eaff8fc3b03d Mon Sep 17 00:00:00 2001
+From: Aibing Chen <chenaibing@cmss.chinamobile.com>
+Date: Fri, 20 Nov 2026 15:35:38 +0800
+Subject: [PATCH net v2] net/mlx5: fix a stack over-read in the QP debugfs
+
+dbg_read() formats the field into char tbuf[18] and passes the return
+value of snprintf() to simple_read_from_buffer() as the number of
+available bytes.  snprintf() returns the length the output would have
+had, not the number of bytes written, so when the string does not fit
+that value is larger than the buffer: the longest QP transport string is
+"Invalid transport type" (22 characters), so with the trailing newline
+the function returns 23 while only 18 bytes were written.
+
+simple_read_from_buffer() uses that length to bound the copy to
+userspace, so reading .../qp/<qpn>/transport copies up to 23 bytes out of
+the 18 byte stack array, leaking 5 bytes of stack.
+
+Enlarge the buffer so the longest string fits and use scnprintf(), which
+returns the number of bytes actually written.
+
+Fixes: db81a5c374b5 ("mlx5_core: Improve debugfs readability")
+Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
+---
+v2:
+- add the Fixes tag for the commit that introduced the tbuf/is_str
+  formatting, as suggested in the review.
+
+ drivers/net/ethernet/mellanox/mlx5/core/debugfs.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/net/ethernet/mellanox/mlx5/core/debugfs.c b/drivers/net/ethernet/mellanox/mlx5/core/debugfs.c
+index 30be2b631..3e75f66f7 100644
+--- a/drivers/net/ethernet/mellanox/mlx5/core/debugfs.c
++++ b/drivers/net/ethernet/mellanox/mlx5/core/debugfs.c
+@@ -496,7 +496,7 @@ static ssize_t dbg_read(struct file *filp, char __user *buf, size_t count,
+ {
+ 	struct mlx5_field_desc *desc;
+ 	struct mlx5_rsc_debug *d;
+-	char tbuf[18];
++	char tbuf[24];
+ 	int is_str = 0;
+ 	u64 field;
+ 	int ret;
+@@ -522,9 +522,10 @@ static ssize_t dbg_read(struct file *filp, char __user *buf, size_t count,
+ 	}
+ 
+ 	if (is_str)
+-		ret = snprintf(tbuf, sizeof(tbuf), "%s\n", (const char *)(unsigned long)field);
++		ret = scnprintf(tbuf, sizeof(tbuf), "%s\n",
++				(const char *)(unsigned long)field);
+ 	else
+-		ret = snprintf(tbuf, sizeof(tbuf), "0x%llx\n", field);
++		ret = scnprintf(tbuf, sizeof(tbuf), "0x%llx\n", field);
+ 
+ 	return simple_read_from_buffer(buf, count, pos, tbuf, ret);
+ }

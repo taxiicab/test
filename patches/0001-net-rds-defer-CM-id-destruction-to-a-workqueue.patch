@@ -1,0 +1,158 @@
+From 1649085b1d309ccdc629fff5fb13cef8748dbd2b Mon Sep 17 00:00:00 2001
+From: Aibing Chen <chenaibing@cmss.chinamobile.com>
+Date: Mon, 16 Nov 2026 15:30:26 +0800
+Subject: [PATCH net v4] net/rds: defer CM id destruction to a workqueue
+
+rds_ib_laddr_check_cm() destroys the RDMA CM id it created while
+rds_trans_get_preferred() holds rds_trans_sem for reading.  The bind
+path then takes rds_trans_sem and afterwards handler_mutex in
+rdma_destroy_id(), while the CM callback path takes handler_mutex in
+cma_ib_req_handler() and afterwards rds_trans_sem through
+rds_conn_create().  lockdep reports the resulting cycle.
+
+Queue the destruction on rds_wq instead, so that rds_trans_sem is
+released before handler_mutex is taken.  The work item is allocated
+before the CM id is created and owns the id until rdma_destroy_id() has
+run; if the allocation fails, the address check fails with -ENOMEM
+rather than falling back to the synchronous destroy, which would bring
+the deadlock back under memory pressure.
+
+Deferring the destruction keeps the CM id alive after bind() returns:
+until the worker runs it pins a cma_dev reference and an RDMA_PS_TCP
+port, and cma_process_remove() waits for every pending destroy.  An
+unprivileged user can call bind() in a loop, so bound the number of
+pending probes with rds_ib_pending_probes and fail the address check
+with -EAGAIN above RDS_IB_MAX_PENDING_PROBES.
+
+rds_ib_exit() flushes rds_wq after rds_trans_unregister() so that no
+queued destroy runs after the module text is gone.
+
+Reported-by: syzbot+ccdb5058c3df2d94811c@syzkaller.appspotmail.com
+Closes: https://syzkaller.appspot.com/bug?extid=ccdb5058c3df2d94811c
+Suggested-by: Hillf Danton <hdanton@sina.com>
+Suggested-by: Jason Gunthorpe <jgg@ziepe.ca>
+Suggested-by: Allison Henderson <achender@kernel.org>
+Fixes: ec16227e1414 ("RDS/IB: Infiniband transport")
+Cc: stable@vger.kernel.org
+Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
+---
+v4:
+- bound the pending probe ids with an atomic counter and return -EAGAIN
+  above RDS_IB_MAX_PENDING_PROBES, since each pending id pins a
+  cma_dev reference and an RDMA_PS_TCP port until the worker runs.
+- document that exposure in the commit message.
+
+v3:
+- allocate the work item before rdma_create_id() and fail with -ENOMEM
+  instead of falling back to the synchronous destroy.
+- free the work item when rdma_create_id() fails and drop the now
+  redundant fallback in the out path.
+
+v2:
+- move the workqueue from RDMA core into RDS, as suggested in review.
+- flush rds_wq in rds_ib_exit() so a queued destroy cannot run after
+  the module text is freed.
+- add the Fixes tag, drop the Tested-by tags.
+
+ net/rds/ib.c | 60 ++++++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 58 insertions(+), 2 deletions(-)
+
+diff --git a/net/rds/ib.c b/net/rds/ib.c
+index 4ea9838d0..c4c10e3ea 100644
+--- a/net/rds/ib.c
++++ b/net/rds/ib.c
+@@ -391,6 +391,30 @@ static void rds6_ib_ic_info(struct socket *sock, unsigned int len,
+ }
+ #endif
+ 
++/*
++ * Maximum number of probe cm_ids whose destruction is still pending on
++ * rds_wq.  Each of them pins a cma_dev reference and an RDMA_PS_TCP port,
++ * so the number of in-flight probes has to be bounded.
++ */
++#define RDS_IB_MAX_PENDING_PROBES	64
++
++static atomic_t rds_ib_pending_probes = ATOMIC_INIT(0);
++
++struct rds_ib_destroy_work {
++	struct work_struct work;
++	struct rdma_cm_id *cm_id;
++};
++
++static void rds_ib_destroy_id_work(struct work_struct *work)
++{
++	struct rds_ib_destroy_work *w =
++		container_of(work, struct rds_ib_destroy_work, work);
++
++	rdma_destroy_id(w->cm_id);
++	kfree(w);
++	atomic_dec(&rds_ib_pending_probes);
++}
++
+ /*
+  * Early RDS/IB was built to only bind to an address if there is an IPoIB
+  * device with that address set.
+@@ -411,14 +435,39 @@ static int rds_ib_laddr_check_cm(struct net *net, const struct in6_addr *addr,
+ #endif
+ 	struct sockaddr_in sin;
+ 	struct sockaddr *sa;
++	struct rds_ib_destroy_work *w;
+ 	bool isv4;
+ 
+ 	isv4 = ipv6_addr_v4mapped(addr);
++
++	/*
++	 * The id is destroyed from rds_wq: rds_trans_get_preferred() calls this
++	 * function with rds_trans_sem held for reading, and rdma_destroy_id()
++	 * takes handler_mutex, which the CM callback path acquires before
++	 * taking rds_trans_sem.  Reserve a pending-probe slot first, so that a
++	 * loop of bind() calls cannot pile up ids that pin a cma_dev reference
++	 * and an RDMA_PS_TCP port.
++	 */
++	if (atomic_inc_return(&rds_ib_pending_probes) >
++	    RDS_IB_MAX_PENDING_PROBES) {
++		atomic_dec(&rds_ib_pending_probes);
++		return -EAGAIN;
++	}
++
++	w = kzalloc_obj(*w, GFP_KERNEL);
++	if (!w) {
++		atomic_dec(&rds_ib_pending_probes);
++		return -ENOMEM;
++	}
++
+ 	/* Create a CMA ID restricted to IB devices and try to bind it. */
+ 	cm_id = rdma_create_id(&init_net, rds_rdma_cm_event_handler,
+ 			       NULL, RDMA_PS_TCP, IB_QPT_RC);
+-	if (IS_ERR(cm_id))
++	if (IS_ERR(cm_id)) {
++		atomic_dec(&rds_ib_pending_probes);
++		kfree(w);
+ 		return PTR_ERR(cm_id);
++	}
+ 	ret = rdma_restrict_node_type(cm_id, RDMA_NODE_IB_CA);
+ 	if (ret)
+ 		goto out;
+@@ -484,7 +533,9 @@ static int rds_ib_laddr_check_cm(struct net *net, const struct in6_addr *addr,
+ 		 cm_id->device ? cm_id->device->node_type : -1);
+ 
+ out:
+-	rdma_destroy_id(cm_id);
++	INIT_WORK(&w->work, rds_ib_destroy_id_work);
++	w->cm_id = cm_id;
++	queue_work(rds_wq, &w->work);
+ 
+ 	return ret;
+ }
+@@ -542,6 +593,11 @@ void rds_ib_exit(void)
+ 	rds_ib_sysctl_exit();
+ 	rds_ib_recv_exit();
+ 	rds_trans_unregister(&rds_ib_transport);
++	/*
++	 * rds_ib_laddr_check_cm() may have queued rdma_destroy_id() on rds_wq;
++	 * wait for it before the module text goes away.
++	 */
++	flush_workqueue(rds_wq);
+ 	rds_ib_mr_exit();
+ }
+ 
