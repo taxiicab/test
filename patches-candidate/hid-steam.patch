@@ -1,0 +1,91 @@
+From f160901cd6a17ac75117abecd10923bf1a7fdd43 Mon Sep 17 00:00:00 2001
+From: Aibing Chen <chenaibing@cmss.chinamobile.com>
+Date: Fri, 27 Nov 2026 18:21:51 +0800
+Subject: [PATCH] HID: steam: use an unsigned payload length for the report
+ request
+
+steam_send_report_id() takes the payload length as an int and passes
+max(size + 1, len) to hid_hw_raw_request(), where len is a u32 taken from
+hid_report_len().  The comparison therefore mixes signed and unsigned
+operands, and a negative size would be converted to a huge unsigned
+value: the HID layer would then read past the end of the report buffer
+allocated for the request.
+
+Take the payload length as unsigned int, which is what the callers pass,
+and compute the request length once before the retry loop.  The %*ph
+arguments are cast explicitly so that the format still matches.
+
+Found by smatch.
+
+Reported-by: kernel test robot <lkp@intel.com>
+Closes: https://lore.kernel.org/r/20261126091909.V8zezOfp-lkp@intel.com/
+Fixes: 0a80b4e8ec6a6 ("HID: steam: Initial 2026 Steam Controller support")
+Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
+---
+ drivers/hid/hid-steam.c | 17 ++++++++++-------
+ 1 file changed, 10 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/hid/hid-steam.c b/drivers/hid/hid-steam.c
+index b9a788be9..376f063f2 100644
+--- a/drivers/hid/hid-steam.c
++++ b/drivers/hid/hid-steam.c
+@@ -515,7 +515,7 @@ static int steam_recv_report_id(struct steam_device *steam,
+ }
+ 
+ static int steam_send_report_id(struct steam_device *steam,
+-		u8 *cmd, int size, u8 report_id)
++		u8 *cmd, unsigned int size, u8 report_id)
+ {
+ 	struct hid_report *r;
+ 	u8 *buf;
+@@ -541,11 +541,13 @@ static int steam_send_report_id(struct steam_device *steam,
+ 	buf[0] = report_id;
+ 	memcpy(buf + 1, cmd, size);
+ 
+-	hid_dbg(steam->hdev, "Sending report %*ph\n", size, cmd);
++	hid_dbg(steam->hdev, "Sending report %*ph\n", (int)size, cmd);
+ 
+ 	if (!(steam->quirks & STEAM_QUIRK_IBEX))
+ 		len += 1;
+ 
++	len = max(size + 1, len);
++
+ 	/*
+ 	 * Sometimes the wireless controller fails with EPIPE
+ 	 * when sending a feature report.
+@@ -554,7 +556,7 @@ static int steam_send_report_id(struct steam_device *steam,
+ 	 */
+ 	do {
+ 		ret = hid_hw_raw_request(steam->hdev, report_id,
+-				buf, max(size + 1, len),
++				buf, len,
+ 				HID_FEATURE_REPORT, HID_REQ_SET_REPORT);
+ 		if (ret != -EPIPE)
+ 			break;
+@@ -568,12 +570,12 @@ static int steam_send_report_id(struct steam_device *steam,
+ 	 */
+ 	if (ret < 0 && ret != -ENODEV)
+ 		hid_err(steam->hdev, "%s: error %d (%*ph)\n", __func__,
+-				ret, size, cmd);
++				ret, (int)size, cmd);
+ 	return ret;
+ }
+ 
+ static int steam_send_report(struct steam_device *steam,
+-		u8 *cmd, int size)
++		u8 *cmd, unsigned int size)
+ {
+ 	u8 report_id;
+ 
+@@ -615,8 +617,9 @@ static int steam_write_settings(struct steam_device *steam,
+ 	return steam_send_report(steam, cmd, 2 + cmd[1]);
+ }
+ 
+-static int steam_exchange_report_id(struct steam_device *steam, u8 *cmd, int csize,
+-		u8 *reply, int rsize, u8 report_id)
++static int steam_exchange_report_id(struct steam_device *steam,
++				    u8 *cmd, unsigned int csize,
++				    u8 *reply, int rsize, u8 report_id)
+ {
+ 	unsigned int retries = 5;
+ 	int ret;
