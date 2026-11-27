@@ -1,1 +1,16 @@
-drivers/input/joystick/adi.o
+# W=1 verification of the joystick scnprintf series
+drivers/input/joystick/a3d.o
+drivers/input/joystick/analog.o
+drivers/input/joystick/gf2k.o
+drivers/input/joystick/grip.o
+drivers/input/joystick/guillemot.o
+drivers/input/joystick/interact.o
+drivers/input/joystick/magellan.o
+drivers/input/joystick/sidewinder.o
+drivers/input/joystick/spaceball.o
+drivers/input/joystick/spaceorb.o
+drivers/input/joystick/stinger.o
+drivers/input/joystick/tmdc.o
+drivers/input/joystick/twidjoy.o
+drivers/input/joystick/warrior.o
+drivers/input/joystick/zhenhua.o
