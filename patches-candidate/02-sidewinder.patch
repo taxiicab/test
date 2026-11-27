@@ -1,6 +1,6 @@
-From ea1e044ff9eaa447bec26e893f87fa061d4854a8 Mon Sep 17 00:00:00 2001
+From bef7e3c0dab2ea6c08045271692aeeba5a022547 Mon Sep 17 00:00:00 2001
 From: Aibing Chen <chenaibing@cmss.chinamobile.com>
-Date: Fri, 27 Nov 2026 09:40:22 +0800
+Date: Fri, 27 Nov 2026 11:41:44 +0800
 Subject: [PATCH 2/2] Input: sidewinder: use scnprintf() for the comment and
  physical path
 
@@ -24,11 +24,11 @@ No functional change.
 
 Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
 ---
- drivers/input/joystick/sidewinder.c | 5 ++---
- 1 file changed, 2 insertions(+), 3 deletions(-)
+ drivers/input/joystick/sidewinder.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/input/joystick/sidewinder.c b/drivers/input/joystick/sidewinder.c
-index 7f37d18c8..ae2f4e1f6 100644
+index 7f37d18c8..f6f76108d 100644
 --- a/drivers/input/joystick/sidewinder.c
 +++ b/drivers/input/joystick/sidewinder.c
 @@ -535,7 +535,7 @@ static void sw_3dp_id(unsigned char *buf, char *comment, size_t size)
@@ -40,13 +40,12 @@ index 7f37d18c8..ae2f4e1f6 100644
  		(int) ((sw_get_bits(buf, 8, 6, 1) << 6) |		/* Two 6-bit values */
  			sw_get_bits(buf, 16, 6, 1)) / 100,
  		(int) ((sw_get_bits(buf, 8, 6, 1) << 6) |
-@@ -723,8 +723,7 @@ static int sw_connect(struct gameport *gameport, struct gameport_driver *drv)
+@@ -723,7 +723,7 @@ static int sw_connect(struct gameport *gameport, struct gameport_driver *drv)
  
  		snprintf(sw->name, sizeof(sw->name),
  			 "Microsoft SideWinder %s", sw_name[sw->type]);
 -		snprintf(sw->phys[i], sizeof(sw->phys[i]),
--			 "%s/input%d", gameport->phys, i);
-+		scnprintf(sw->phys[i], sizeof(sw->phys[i]), "%s/input%d", gameport->phys, i);
++		scnprintf(sw->phys[i], sizeof(sw->phys[i]),
+ 			 "%s/input%d", gameport->phys, i);
  
  		sw->dev[i] = input_dev = input_allocate_device();
- 		if (!input_dev) {
