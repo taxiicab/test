@@ -1,0 +1,18 @@
+=== 0001-md-raid1-reject-oversized-raid_disks-values.patch
+Applied patch to 'drivers/md/raid1.c' cleanly.
+OK   0001-md-raid1-reject-oversized-raid_disks-values.patch
+=== 0001-net-hso-cap-the-MTU-and-drop-oversized-frames.patch
+Applied patch to 'drivers/net/usb/hso.c' cleanly.
+OK   0001-net-hso-cap-the-MTU-and-drop-oversized-frames.patch
+=== 0001-net-hso-fix-stashed-tx-skb-leak-and-replay-race.patch
+Applied patch to 'drivers/net/usb/hso.c' cleanly.
+OK   0001-net-hso-fix-stashed-tx-skb-leak-and-replay-race.patch
+=== 0001-net-mlx5-fix-a-stack-over-read-in-the-QP-debugfs.patch
+Applied patch to 'drivers/net/ethernet/mellanox/mlx5/core/debugfs.c' cleanly.
+OK   0001-net-mlx5-fix-a-stack-over-read-in-the-QP-debugfs.patch
+=== 0001-net-rds-defer-CM-id-destruction-to-a-workqueue.patch
+Applied patch to 'net/rds/ib.c' cleanly.
+OK   0001-net-rds-defer-CM-id-destruction-to-a-workqueue.patch
+=== 0001-ntfs3-avoid-freeing-the-primary-MFT-record-during-attribute-.patch
+Applied patch to 'fs/ntfs3/frecord.c' cleanly.
+OK   0001-ntfs3-avoid-freeing-the-primary-MFT-record-during-attribute-.patch

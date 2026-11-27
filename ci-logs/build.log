@@ -1,0 +1,45 @@
+=== make W=1 drivers/net/usb/hso.o
+  DESCEND objtool
+  CC      scripts/mod/empty.o
+  CC      scripts/mod/devicetable-offsets.s
+  MKELF   scripts/mod/elfconfig.h
+  HOSTCC  scripts/mod/modpost.o
+  HOSTCC  scripts/mod/file2alias.o
+  HOSTCC  scripts/mod/sumversion.o
+  HOSTCC  scripts/mod/symsearch.o
+  HOSTLD  scripts/mod/modpost
+  CC      kernel/bounds.s
+  CC      arch/x86/kernel/asm-offsets.s
+  CC      kernel/sched/rq-offsets.s
+  CALL    scripts/checksyscalls.sh 
+  CC [M]  drivers/net/usb/hso.o
+OK   drivers/net/usb/hso.o
+=== make W=1 net/rds/ib.o
+  DESCEND objtool
+  CC [M]  net/rds/ib.o
+OK   net/rds/ib.o
+=== make W=1 drivers/net/wireguard/peerlookup.o
+  DESCEND objtool
+  CC [M]  drivers/net/wireguard/peerlookup.o
+OK   drivers/net/wireguard/peerlookup.o
+=== make W=1 drivers/md/raid1.o
+  DESCEND objtool
+  CC [M]  drivers/md/raid1.o
+OK   drivers/md/raid1.o
+=== make W=1 drivers/net/ethernet/mellanox/mlx5/core/debugfs.o
+  DESCEND objtool
+  CC [M]  drivers/net/ethernet/mellanox/mlx5/core/debugfs.o
+OK   drivers/net/ethernet/mellanox/mlx5/core/debugfs.o
+=== make W=1 fs/squashfs/namei.o
+  DESCEND objtool
+  CC [M]  fs/squashfs/namei.o
+OK   fs/squashfs/namei.o
+=== make W=1 fs/squashfs/inode.o
+  DESCEND objtool
+  CC [M]  fs/squashfs/inode.o
+OK   fs/squashfs/inode.o
+=== make W=1 fs/squashfs/export.o
+  DESCEND objtool
+  CC [M]  fs/squashfs/export.o
+OK   fs/squashfs/export.o
+RESULT=0
