@@ -1,4 +1,4 @@
-From 405a6687d99abb0d10e9ff200de7c8a280a5948b Mon Sep 17 00:00:00 2001
+From db58f7d64b5d1877e2c1333c55cae4cf60d70420 Mon Sep 17 00:00:00 2001
 From: Aibing Chen <chenaibing@cmss.chinamobile.com>
 Date: Fri, 27 Nov 2026 16:04:46 +0800
 Subject: [PATCH] thermal/debugfs: size the transition buffer for the worst
@@ -19,14 +19,14 @@ Size the buffer for the packed state values.
 
 Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
 ---
- drivers/thermal/thermal_debugfs.c | 6 +++---
- 1 file changed, 3 insertions(+), 3 deletions(-)
+ drivers/thermal/thermal_debugfs.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/drivers/thermal/thermal_debugfs.c b/drivers/thermal/thermal_debugfs.c
-index da02d8f17..9b3731b57 100644
+index da02d8f17..d320442f4 100644
 --- a/drivers/thermal/thermal_debugfs.c
 +++ b/drivers/thermal/thermal_debugfs.c
-@@ -323,10 +323,10 @@ static int cdev_tt_seq_show(struct seq_file *s, void *v)
+@@ -323,13 +323,13 @@ static int cdev_tt_seq_show(struct seq_file *s, void *v)
  
  	list_for_each_entry(entry, &transitions[i], node) {
  		/*
@@ -39,4 +39,8 @@ index da02d8f17..9b3731b57 100644
 +		char buffer[13];
  
  		snprintf(buffer, ARRAY_SIZE(buffer), "%d->%d",
- 			 entry->id >> 16, entry->id & 0xFFFF);
+-			 entry->id >> 16, entry->id & 0xFFFF);
++			 (entry->id >> 16) & 0xFFFF, entry->id & 0xFFFF);
+ 
+ 		seq_printf(s, "%-10s\t%-10llu\n", buffer, entry->count);
+ 	}
