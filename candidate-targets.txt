@@ -1,1 +1,1 @@
-# nothing to build
+drivers/thermal/thermal_debugfs.o

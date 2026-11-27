@@ -1,0 +1,42 @@
+From 405a6687d99abb0d10e9ff200de7c8a280a5948b Mon Sep 17 00:00:00 2001
+From: Aibing Chen <chenaibing@cmss.chinamobile.com>
+Date: Fri, 27 Nov 2026 16:04:46 +0800
+Subject: [PATCH] thermal/debugfs: size the transition buffer for the worst
+ case
+
+cdev_tt_seq_show() formats a cooling device transition as "%d->%d" into a
+11 byte buffer.  A transition packs two 16 bit state values into
+entry->id, so the worst case is "65535->65535" plus the terminator, 13
+bytes.  With -Wformat-truncation enabled for W=1 builds, and COMPILE_TEST
+configurations turning the warning into an error through CONFIG_WERROR,
+the file does not build:
+
+  drivers/thermal/thermal_debugfs.c:331:59: error: '%d' directive output
+    may be truncated writing between 1 and 5 bytes into a region of size
+    between 3 and 8 [-Werror=format-truncation=]
+
+Size the buffer for the packed state values.
+
+Signed-off-by: Aibing Chen <chenaibing@cmss.chinamobile.com>
+---
+ drivers/thermal/thermal_debugfs.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/thermal/thermal_debugfs.c b/drivers/thermal/thermal_debugfs.c
+index da02d8f17..9b3731b57 100644
+--- a/drivers/thermal/thermal_debugfs.c
++++ b/drivers/thermal/thermal_debugfs.c
+@@ -323,10 +323,10 @@ static int cdev_tt_seq_show(struct seq_file *s, void *v)
+ 
+ 	list_for_each_entry(entry, &transitions[i], node) {
+ 		/*
+-		 * Assuming maximum cdev states is 1024, the longer
+-		 * string for a transition would be "1024->1024\0"
++		 * A transition packs two 16 bit state values, so the
++		 * longer string would be "65535->65535\0"
+ 		 */
+-		char buffer[11];
++		char buffer[13];
+ 
+ 		snprintf(buffer, ARRAY_SIZE(buffer), "%d->%d",
+ 			 entry->id >> 16, entry->id & 0xFFFF);
