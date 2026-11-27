@@ -1,0 +1,4 @@
+=== hid-steam.patch
+Checking patch drivers/hid/hid-steam.c...
+Applied patch drivers/hid/hid-steam.c cleanly.
+OK   hid-steam.patch
