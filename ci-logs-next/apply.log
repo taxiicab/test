@@ -1,0 +1,29 @@
+=== 0001-squashfs-return-EINVAL-on-invalid-directory-inode-size.patch
+Checking patch fs/squashfs/inode.c...
+error: while searching for:
+
+		/* The directory size must be 3 or larger, as it includes "." and ".." entries */
+		inode->i_size = le16_to_cpu(sqsh_ino->file_size);
+		if (inode->i_size < 3)
+			goto failed_read;
+
+		set_nlink(inode, le32_to_cpu(sqsh_ino->nlink));
+		inode->i_op = &squashfs_dir_inode_ops;
+
+error: patch failed: fs/squashfs/inode.c:255
+error: fs/squashfs/inode.c: patch does not apply
+FAIL 0001-squashfs-return-EINVAL-on-invalid-directory-inode-size.patch
+=== 0002-squashfs-return-EIO-on-out-of-bounds-directory-entry-in-lookup.patch
+Checking patch fs/squashfs/namei.c...
+error: while searching for:
+		 * Read directory header.
+		 */
+		if (!squashfs_dir_space(dir, length, sizeof(dirh)))
+			goto read_failure;
+
+		err = squashfs_read_metadata(dir->i_sb, &dirh, &block,
+				&offset, sizeof(dirh));
+
+error: patch failed: fs/squashfs/namei.c:203
+error: fs/squashfs/namei.c: patch does not apply
+FAIL 0002-squashfs-return-EIO-on-out-of-bounds-directory-entry-in-lookup.patch
