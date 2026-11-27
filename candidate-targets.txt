@@ -1,6 +1,1 @@
-# W=1 verification: keyboard scnprintf patch
-drivers/input/keyboard/lkkbd.o
-drivers/input/keyboard/newtonkbd.o
-drivers/input/keyboard/stowaway.o
-drivers/input/keyboard/sunkbd.o
-drivers/input/keyboard/xtkbd.o
+# nothing to build
